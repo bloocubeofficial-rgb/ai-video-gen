@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // No special config needed anymore!
+  output: 'standalone',
 };
 
 export default nextConfig;
