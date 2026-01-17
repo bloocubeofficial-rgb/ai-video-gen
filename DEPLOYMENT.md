@@ -30,14 +30,12 @@ The application requires the following environment variable:
      --platform managed \
      --region us-central1 \
      --allow-unauthenticated \
-     --set-env-vars GOOGLE_API_KEY=your-api-key-here,ALLOWED_IFRAME_ORIGINS=https://your-bloocube-frontend.com \
+     --set-env-vars GOOGLE_API_KEY=your-api-key-here \
      --memory 2Gi \
      --cpu 2 \
      --timeout 300 \
      --max-instances 10
    ```
-   
-   **Note:** Replace `https://your-bloocube-frontend.com` with your actual Bloocube frontend URL to allow iframe embedding. See `IFRAME_EMBEDDING.md` for more details.
 
 ### Option 2: Deploy using Cloud Build
 
