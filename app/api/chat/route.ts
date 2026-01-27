@@ -237,30 +237,97 @@ export async function POST(req: Request) {
             let finished = false;
             let attempts = 0;
             
+            // Helper function to recursively search for URI in response
+            const findVideoUri = (obj: any, depth = 0): string | null => {
+                if (depth > 10) return null; // Prevent infinite recursion
+                if (!obj || typeof obj !== 'object') return null;
+                
+                // Check if this object has a 'uri' property
+                if (obj.uri && typeof obj.uri === 'string' && obj.uri.length > 0) {
+                    return obj.uri;
+                }
+                
+                // Check if this object has a 'video' property with uri
+                if (obj.video?.uri && typeof obj.video.uri === 'string') {
+                    return obj.video.uri;
+                }
+                
+                // Recursively search in all properties
+                for (const key in obj) {
+                    if (obj.hasOwnProperty(key)) {
+                        const result = findVideoUri(obj[key], depth + 1);
+                        if (result) return result;
+                    }
+                }
+                
+                return null;
+            };
+            
             while (!finished && attempts < 60) {
                 attempts++;
                 await new Promise(r => setTimeout(r, 3000));
                 
                 const pollRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${opName}?key=${apiKey}`);
+                
+                if (!pollRes.ok) {
+                    const errorData = await pollRes.json().catch(() => ({}));
+                    console.error(`[Video Poll ${attempts}] HTTP ${pollRes.status}:`, errorData);
+                    if (attempts >= 10) {
+                        throw new Error(`Polling failed after ${attempts} attempts: ${errorData.error?.message || pollRes.statusText}`);
+                    }
+                    continue; // Retry on HTTP errors
+                }
+                
                 const pollData = await pollRes.json();
 
                 if (pollData.done) {
                     finished = true;
-                    if (pollData.error) throw new Error(`Video generation failed: ${pollData.error.message}`);
+                    if (pollData.error) {
+                        console.error('[Video Generation] Error in response:', pollData.error);
+                        throw new Error(`Video generation failed: ${pollData.error.message || JSON.stringify(pollData.error)}`);
+                    }
                     
-                    const potentialUri = 
+                    // Try multiple known paths first
+                    let potentialUri = 
                         pollData.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
-                        pollData.response?.generatedVideos?.[0]?.video?.uri || 
-                        pollData.metadata?.outputUri;
+                        pollData.response?.generateVideoResponse?.generatedSamples?.[0]?.uri ||
+                        pollData.response?.generatedVideos?.[0]?.video?.uri ||
+                        pollData.response?.generatedVideos?.[0]?.uri ||
+                        pollData.response?.video?.uri ||
+                        pollData.metadata?.outputUri ||
+                        pollData.outputUri ||
+                        pollData.uri;
+
+                    // If not found in known paths, recursively search the entire response
+                    if (!potentialUri) {
+                        console.warn('[Video Generation] URI not found in known paths, searching entire response...');
+                        console.log('[Video Generation] Full response structure:', JSON.stringify(pollData, null, 2));
+                        potentialUri = findVideoUri(pollData);
+                    }
 
                     if (potentialUri) {
-                        mediaUrl = potentialUri.includes('key=') ? potentialUri : `${potentialUri}${potentialUri.includes('?') ? '&' : '?'}key=${apiKey}`;
+                        // Ensure the URI has the API key for authentication
+                        mediaUrl = potentialUri.includes('key=') 
+                            ? potentialUri 
+                            : `${potentialUri}${potentialUri.includes('?') ? '&' : '?'}key=${apiKey}`;
                         mediaType = 'video';
                         textResponse = "Cinematic sequence finalized.";
+                        console.log(`[Video Generation] Success! Video URI found: ${potentialUri.substring(0, 100)}...`);
                     } else {
-                        throw new Error("Video completed but URI was not found.");
+                        // Log the full response for debugging
+                        console.error('[Video Generation] URI not found. Full response:', JSON.stringify(pollData, null, 2));
+                        throw new Error(`Video completed but URI was not found in response. Response structure may have changed. Check logs for details.`);
+                    }
+                } else {
+                    // Log progress every 10 attempts
+                    if (attempts % 10 === 0) {
+                        console.log(`[Video Generation] Still processing... (attempt ${attempts}/60)`);
                     }
                 }
+            }
+            
+            if (!finished) {
+                throw new Error("Video generation timed out after 60 polling attempts (3 minutes).");
             }
             break;
 
